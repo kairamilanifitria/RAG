@@ -1,0 +1,422 @@
+## CHAPTER 1 Hello Transformers
+
+In 2017, researchers at Google published a paper that proposed a novel neural network architecture for sequence modeling. 1  Dubbed the Transformer , this architecture outperformed recurrent neural networks (RNNs) on machine translation tasks, both in terms of translation quality and training cost.
+
+In parallel, an effective transfer learning method called ULMFiT showed that training long short-term memory (LSTM) networks on a very large and diverse corpus could produce state-of-the-art text classifiers with little labeled data. 2
+
+These advances were the catalysts for two of today's most well-known transformers: the Generative Pretrained Transformer (GPT) 3 and Bidirectional Encoder Representations from Transformers (BERT). 4 By combining the Transformer architecture with unsupervised learning, these models removed the need to train task-specific architectures from scratch and broke almost every benchmark in NLP by a significant margin. Since the release of GPT and BERT, a zoo of transformer models has emerged; a timeline of the most prominent entries is shown in Figure 1-1.
+
+1 A. Vaswani et al., ' Attention Is All Y ou Need', (2017). This title was so catchy that no less than 50 follow-up papers have included 'all you need' in their titles!
+
+2 J. Howard and S. Ruder, 'Universal Language Model Fine-Tuning for Text Classification', (2018).
+
+3 A. Radford et al., 'Improving Language Understanding by Generative Pre-Training', (2018).
+
+4 J. Devlin et al., 'BERT: Pre-Training of Deep Bidirectional Transformers for Language Understanding', (2018).
+
+Figure 1-1. The transformers timeline
+
+![Image](E:\CODE\RAG\Documents\output\part1_artifacts\image_000000_ae6aab24c545cf3bbbf12b9dc51f329fbea6535c7652dd12c743bb476db62919.png)
+
+*Image Description:* The image is a timeline diagram titled "The transformers timeline," likely illustrating key developments, milestones, or architectural components in the evolution of transformer models in machine learning. It may include stages like the introduction of attention mechanisms, notable models (e.g., BERT, GPT), or technical advancements. The figure serves as a visual overview of the progression leading to modern transformer-based systems.
+
+But we're getting ahead of ourselves. To understand what is novel about transformers, we first need to explain:
+
+- The encoder-decoder framework
+- Attention mechanisms
+- Transfer learning
+
+In  this  chapter  we'll  introduce  the  core  concepts  that  underlie  the  pervasiveness  of transformers, take a tour of some of the tasks that they excel at, and conclude with a look at the Hugging Face ecosystem of tools and libraries.
+
+Let's  start  by  exploring  the  encoder-decoder  framework  and  the  architectures  that preceded the rise of transformers.
+
+## The Encoder-Decoder Framework
+
+Prior to transformers, recurrent architectures such as LSTMs were the state of the art in NLP. These architectures contain a feedback loop in the network connections that allows  information  to  propagate  from  one  step  to  another,  making  them  ideal  for modeling  sequential  data  like  text.  As  illustrated  on  the  left  side  of  Figure  1-2,  an RNN receives some input (which could be a word or character), feeds it through the network, and outputs a vector called the hidden state .  At  the  same  time,  the  model feeds some information back to itself through the feedback loop, which it can then use in the next step. This can be more clearly seen if we 'unroll' the loop as shown on the right side of Figure 1-2: the RNN passes information about its state at each step to the next operation in the sequence. This allows an RNN to keep track of information from previous steps, and use it for its output predictions.
+
+Figure 1-2. Unrolling an RNN in time
+
+![Image](E:\CODE\RAG\Documents\output\part1_artifacts\image_000001_96a5422c82ff72229c77e8b0d83b1bc4c9783eddce1567fa3e4a049c4693670b.png)
+
+*Image Description:* The image depicts a diagram illustrating the unrolling of a Recurrent Neural Network (RNN) across time steps. It visually represents how an RNN processes sequential data by expanding the network through time, with each cell corresponding to a time step. The diagram likely shows connections between hidden states across time, shared weights, and inputs/outputs at each step, emphasizing the temporal dependencies modeled by RNNs. This unrolling technique is fundamental for understanding how RNNs handle sequences in tasks like NLP or time-series prediction, as referenced in the context.
+
+These architectures were (and continue to be) widely used for NLP tasks, speech processing, and time series. You can find a wonderful exposition of their capabilities in Andrej  Karpathy's  blog  post,  'The  Unreasonable  Effectiveness  of  Recurrent  Neural Networks'.
+
+One area where RNNs played an important role was in the development of machine translation systems, where the objective is to map a sequence of words in one language  to  another.  This  kind  of  task  is  usually  tackled  with  an encoder-decoder or sequence-to-sequence architecture, 5 which is well suited for situations where the input and  output  are  both  sequences  of  arbitrary  length.  The  job  of  the  encoder  is  to encode the information from the input sequence into a numerical representation that is  often  called  the last  hidden  state .  This  state  is  then  passed  to  the  decoder,  which generates the output sequence.
+
+In general, the encoder and decoder components can be any kind of neural network architecture  that  can  model  sequences.  This  is  illustrated  for  a  pair  of  RNNs  in Figure 1-3, where the English sentence 'Transformers are great!' is encoded as a hidden  state  vector  that  is  then  decoded  to  produce  the  German  translation  'Transformer sind grossartig!'  The  input  words  are  fed  sequentially  through  the  encoder and the output words are generated one at a time, from top to bottom.
+
+5 I. Sutskever, O. Vinyals, and Q.V . Le, 'Sequence to Sequence Learning with Neural Networks', (2014).
+
+Figure 1-3. An encoder-decoder architecture with a pair of RNNs (in general, there are many more recurrent layers than those shown here)
+
+![Image](E:\CODE\RAG\Documents\output\part1_artifacts\image_000002_23521f3d35422fa73585da0eee8da7a826bc7f4d395547c3f1947cee7c69db61.png)
+
+*Image Description:* The image depicts an encoder-decoder architecture using recurrent neural networks (RNNs). It shows an input sequence processed by the encoder RNN, which compresses the information into a fixed-length hidden state (the bottleneck). This hidden state is then passed to the decoder RNN to generate the output sequence. The figure highlights the limitation of representing the entire input sequence in a single fixed vector, which can lead to information loss, especially for long sequences. The architecture includes multiple RNN layers in both encoder and decoder components.
+
+Although elegant in its simplicity, one weakness of this architecture is that the final hidden state of the encoder creates an information bottleneck :  it  has to represent the meaning of  the  whole  input  sequence  because  this  is  all  the  decoder  has  access  to when generating the output. This is especially challenging for long sequences, where information at the start of the sequence might be lost in the process of compressing everything to a single, fixed representation.
+
+Fortunately,  there  is  a  way  out  of  this  bottleneck  by  allowing  the  decoder  to  have access to all of the encoder's hidden states. The general mechanism for this is called attention , 6 and it is a key component in many modern neural network architectures. Understanding how attention was developed for RNNs will put us in good shape to understand  one  of  the  main  building  blocks  of  the  Transformer  architecture.  Let's take a deeper look.
+
+## Attention Mechanisms
+
+The main idea behind attention is that instead of producing a single hidden state for the input sequence, the encoder outputs a hidden state at each step that the decoder can access. However, using all the states at the same time would create a huge input for the decoder, so some mechanism is needed to prioritize which states to use. This is where attention comes in: it lets the decoder assign a different amount of weight, or 'attention, ' to each of the encoder states at every decoding timestep. This process is illustrated in Figure 1-4, where the role of attention is shown for predicting the third token in the output sequence.
+
+6 D. Bahdanau, K. Cho, and Y. Bengio, 'Neural Machine Translation by Jointly Learning to Align and Translate', (2014).
+
+4 | Chapter 1: Hello Transformers
+
+Figure 1-4. An encoder-decoder architecture with an attention mechanism for a pair of RNNs
+
+![Image](E:\CODE\RAG\Documents\output\part1_artifacts\image_000003_d5d2c43f371f725d14cc30703ac6eebd2efabe9e406c6a9b4fd6847945461ddf.png)
+
+*Image Description:* The image illustrates an encoder-decoder architecture with an attention mechanism for neural machine translation. It shows how the model aligns input tokens (e.g., English words) with output tokens (e.g., French words) by focusing on relevant parts of the input sequence during decoding, as visualized in Figure 1-5 through attention weight heatmaps. The architecture includes RNN layers in both encoder and decoder, with attention weights dynamically highlighting critical input elements (e.g., "zone" aligning with "région") to improve translation accuracy.
+
+By  focusing  on  which  input  tokens  are  most  relevant  at  each  timestep,  these attention-based models are able to learn nontrivial alignments between the words in a generated translation and those in a source sentence. For example, Figure 1-5 visualizes  the  attention  weights  for  an  English  to  French  translation  model,  where  each pixel denotes a weight. The figure shows how the decoder is able to correctly align the words 'zone' and ' Area' , which are ordered differently in the two languages.
+
+Figure 1-5. RNN encoder-decoder alignment of words in English and the generated translation in French (courtesy of Dzmitry Bahdanau)
+
+![Image](E:\CODE\RAG\Documents\output\part1_artifacts\image_000004_fc0bf63f5c4e70401112a63c8f770e6666abc82f9d3d091709045f30f0fcb5bd.png)
+
+*Image Description:* The image is a visualization of an RNN encoder-decoder model's alignment between English and French sentences. It likely displays a heatmap or matrix where rows represent English words and columns represent French words, with color intensity indicating the strength of alignment (e.g., darker cells show stronger correspondence). Diagonal patterns may highlight word-by-word translations, reflecting how the model associates source and target language words during translation. The figure illustrates the model's attention mechanism, showing how specific input words influence output word generation. (Note: Description is inferred from the provided caption, as the image itself cannot be viewed directly.)
+
+|
+
+Although attention enabled the production of much better translations, there was still a major shortcoming with using recurrent models for the encoder and decoder: the computations are inherently sequential  and  cannot  be  parallelized  across  the  input sequence.
+
+With  the  transformer,  a  new  modeling  paradigm  was  introduced:  dispense  with recurrence altogether, and instead rely entirely on a special form of attention called self-attention . We'll cover self-attention in more detail in Chapter 3, but the basic idea is  to  allow attention to operate on all the states in the same layer of  the  neural network. This is shown in Figure 1-6, where both the encoder and the decoder have their own self-attention  mechanisms,  whose  outputs  are  fed  to  feed-forward  neural  networks (FF NNs). This architecture can be trained much faster than recurrent models and paved the way for many of the recent breakthroughs in NLP .
+
+Figure 1-6. Encoder-decoder architecture of the original Transformer
+
+![Image](E:\CODE\RAG\Documents\output\part1_artifacts\image_000005_4f3342769d30c15720cd7aad0c206ecbb3b60683baa175637404828cc0c01b29.png)
+
+*Image Description:* The image illustrates the encoder-decoder architecture of the original Transformer model, featuring stacked encoder and decoder layers. The encoder processes input sequences through multi-head self-attention and feed-forward networks, while the decoder generates outputs using masked self-attention and encoder-decoder attention. The diagram highlights components like input embeddings, positional encodings, and the final linear layer with softmax, emphasizing the model's reliance on attention mechanisms without recurrent layers. This structure, introduced in the "Attention Is All You Need" paper, enables parallelized processing and long-range dependency modeling.
+
+In the original Transformer paper, the translation model was trained from scratch on a  large  corpus  of  sentence  pairs  in  various  languages.  However,  in  many  practical applications of NLP we do not have access to large amounts of labeled text data to train  our  models  on.  A  final  piece  was  missing  to  get  the  transformer  revolution started: transfer learning.
+
+## Transfer Learning in NLP
+
+It is nowadays common practice in computer vision to use transfer learning to train a convolutional neural network like ResNet on one task, and then adapt it to or finetune it on a new task. This allows the network to make use of the knowledge learned from the original task. Architecturally, this involves splitting the model into of a body and a head , where the head is a task-specific network. During training, the weights of the body learn broad features of the source domain, and these weights are used to initialize a new model for the new task. 7 Compared to traditional supervised learning, this approach typically produces high-quality models that can be trained much more
+
+7 Weights are the learnable parameters of a neural network.
+
+6 | Chapter 1: Hello Transformers
+
+efficiently on a variety of downstream tasks, and with much less labeled data. A comparison of the two approaches is shown in Figure 1-7.
+
+Figure 1-7. Comparison of traditional supervised learning (left) and transfer learning (right)
+
+![Image](E:\CODE\RAG\Documents\output\part1_artifacts\image_000006_7e3ad77ea1484f62b8d68533047b7145e7086db1732b44665758f38391a9a166.png)
+
+*Image Description:* 
+
+In computer vision, the models are first trained on large-scale datasets such as ImageNet, which contain millions of images. This process is called pretraining and its main purpose is to teach the models the basic features of images, such as edges or colors. These pretrained models can then be fine-tuned on a downstream task such as classifying flower species with a relatively small number of labeled examples (usually a few hundred  per  class).  Fine-tuned  models  typically  achieve  a  higher  accuracy  than supervised models trained from scratch on the same amount of labeled data.
+
+Although  transfer  learning  became  the  standard  approach  in  computer  vision,  for many years it was not clear what the analogous pretraining process was for NLP . As a result,  NLP applications typically required large amounts of labeled data to achieve high performance. And even then, that performance did not compare to what was achieved in the vision domain.
+
+In  2017  and  2018,  several  research  groups  proposed  new  approaches  that  finally made transfer learning work for NLP. It started with an insight from researchers at OpenAI who obtained strong performance on a sentiment classification task by using features  extracted  from  unsupervised  pretraining. 8 This  was  followed  by  ULMFiT, which introduced a general framework to adapt pretrained LSTM models for various tasks. 9
+
+As illustrated in Figure 1-8, ULMFiT involves three main steps:
+
+## Pretraining
+
+The initial training objective is quite simple: predict the next word based on the previous words. This task is referred to as language modeling . The elegance of this approach lies in the fact that no labeled data is required, and one can make use of abundantly available text from sources such as Wikipedia. 10
+
+## Domain adaptation
+
+Once the language model is pretrained on a large-scale corpus, the next step is to adapt it to the in-domain corpus (e.g., from Wikipedia to the IMDb corpus of movie reviews, as in Figure 1-8). This stage still uses language modeling, but now the model has to predict the next word in the target corpus.
+
+## Fine-tuning
+
+In this step, the language model is fine-tuned with a classification layer for the target task (e.g., classifying the sentiment of movie reviews in Figure 1-8).
+
+Figure 1-8. The ULMFiT process (courtesy of Jeremy Howard)
+
+![Image](E:\CODE\RAG\Documents\output\part1_artifacts\image_000007_886473efe049af6b410f6e6b4919f1fd42a8e12e8738e0621352fecfb53b4931.png)
+
+*Image Description:* The image is a diagram titled "Figure 1-8. The ULMFiT process (courtesy of Jeremy Howard)" which illustrates the ULMFiT (Universal Language Model Fine-tuning) framework for natural language processing (NLP). The diagram outlines a three-stage transfer learning process:
+
+1. **Pretraining**: A language model is pretrained on a large general corpus (e.g., Wikipedia) to learn general language representations. This stage is represented as the initial step in the flowchart.
+
+2. **Fine-tuning**: The pretrained model is adapted to a specific target task (e.g., text classification, sentiment analysis) through task-specific fine-tuning. The diagram likely shows this as a subsequent step, with arrows indicating the transfer of knowledge from the pretraining phase.
+
+3. **Task-specific tuning**: The model is further optimized for the target task, leveraging the learned representations from the previous stages. The diagram may highlight the integration of self-attention mechanisms (as noted in the context) to enhance performance.
+
+The process emphasizes the efficiency of transfer learning,
+
+By  introducing  a  viable  framework  for  pretraining  and  transfer  learning  in  NLP , ULMFiT  provided  the  missing  piece  to  make  transformers  take  off.  In  2018,  two transformers were released that combined self-attention with transfer learning:
+
+8 A. Radford, R. Jozefowicz, and I. Sutskever, 'Learning to Generate Reviews and Discovering Sentiment', (2017).
+
+9 A related work at this time was ELMo (Embeddings from Language Models), which showed how pretraining LSTMs could produce high-quality word embeddings for downstream tasks.
+
+10 This is more true for English than for most of the world's languages, where obtaining a large corpus of digitized text can be difficult. Finding ways to bridge this gap is an active area of NLP research and activism.
+
+GPT
+
+Uses only the decoder part of the Transformer architecture, and the same language modeling approach as ULMFiT. GPT was pretrained on the BookCorpus, 11 which  consists  of  7,000  unpublished  books  from  a  variety  of  genres  including Adventure, Fantasy, and Romance.
+
+## BERT
+
+Uses the encoder part of the Transformer architecture, and a special form of language modeling called masked language modeling .  The objective of masked language  modeling  is  to  predict  randomly  masked  words  in  a  text.  For  example, given a sentence like 'I looked at my [MASK] and saw that [MASK] was late. ' the model needs to predict the most likely candidates for the masked words that are denoted  by [MASK] .  BERT  was  pretrained  on  the  BookCorpus  and  English Wikipedia.
+
+GPT and BERT set a new state of the art across a variety of NLP benchmarks and ushered in the age of transformers.
+
+However, with different research labs releasing their models in incompatible frameworks (PyTorch or TensorFlow), it wasn't always easy for NLP practitioners to port these models to their own applications. With the release of Transformers, a unified API across more than 50 architectures was progressively built. This library catalyzed the explosion of research into transformers and quickly trickled down to NLP practitioners,  making  it  easy  to  integrate  these  models  into  many  real-life  applications today. Let's have a look!
+
+## Hugging Face Transformers: Bridging the Gap
+
+Applying  a  novel  machine  learning  architecture  to  a  new  task  can  be  a  complex undertaking, and usually involves the following steps:
+
+1. Implement  the  model  architecture  in  code,  typically  based  on  PyTorch  or TensorFlow.
+2. Load the pretrained weights (if available) from a server.
+3. Preprocess  the  inputs,  pass  them  through  the  model,  and  apply  some  taskspecific postprocessing.
+4. Implement  dataloaders  and  define  loss  functions  and  optimizers  to  train  the model.
+
+11 Y. Zhu et al., ' Aligning Books and Movies: Towards Story-Like Visual Explanations by Watching Movies and Reading Books', (2015).
+
+Each of these steps requires custom logic for each model and task. Traditionally (but not always!),  when research groups publish a new article, they will also release the code  along  with  the  model  weights.  However,  this  code  is  rarely  standardized  and often requires days of engineering to adapt to new use cases.
+
+This is where Transformers comes to the NLP practitioner's rescue! It provides a standardized  interface  to  a  wide  range  of  transformer  models  as  well  as  code  and tools  to  adapt  these  models  to  new  use  cases.  The  library  currently  supports  three major deep learning frameworks (PyTorch, TensorFlow, and JAX) and allows you to easily  switch  between  them.  In  addition,  it  provides  task-specific  heads  so  you  can easily fine-tune transformers on downstream tasks such as text classification, named entity recognition, and question answering. This reduces the time it takes a practitioner to train and test a handful of models from a week to a single afternoon!
+
+You'll see this for yourself in the next section, where we show that with just a few lines of  code, Transformers can be applied to tackle some of the most common NLP applications that you're likely to encounter in the wild.
+
+## A Tour of Transformer Applications
+
+Every NLP task starts with a piece of text, like the following made-up customer feedback about a certain online order:
+
+text = """Dear Amazon, last week I ordered an Optimus Prime action figure from your online store in Germany. Unfortunately, when I opened the package, I discovered to my horror that I had been sent an action figure of Megatron instead! As a lifelong enemy of the Decepticons, I hope you can understand my dilemma. To resolve the issue, I demand an exchange of Megatron for the Optimus Prime figure I ordered. Enclosed are copies of my records concerning this purchase. I expect to hear from you soon. Sincerely, Bumblebee."""
+
+Depending on your application, the text you're working with could be a legal contract, a product description, or something else entirely. In the case of customer feedback, you would probably like to know whether the feedback is positive or negative. This task is called sentiment analysis and is part of the broader topic of text classification that  we'll  explore  in  Chapter  2.  For  now,  let's  have  a  look  at  what  it  takes  to extract the sentiment from our piece of text using Transformers.
+
+## Text Classification
+
+As we'll see in later chapters, Transformers has a layered API that allows you to interact with the library at various levels of abstraction. In this chapter we'll start with pipelines ,  which  abstract  away  all  the  steps  needed  to  convert  raw  text  into  a  set  of predictions from a fine-tuned model.
+
+![Image](E:\CODE\RAG\Documents\output\part1_artifacts\image_000008_7ab232049b93de54191c16abd7bef1f8055fad39d7c8b2397b02f8ae9566ba93.png)
+
+*Image Description:* The image is a small 32x32 pixel icon featuring a blue square with a white lowercase "i" (likely representing "information" or "input") centered inside it. The design is minimalistic, with a white background and simple color contrast. In the context of the Transformers library, this could symbolize a pipeline component or an informational step in processing text data.
+
+In Transformers, we instantiate a pipeline by calling the pipeline() function and providing the name of the task we are interested in:
+
+```
+from transformers import pipeline classifier = pipeline("text-classification")
+```
+
+The first  time  you  run  this  code  you'll  see  a  few  progress  bars  appear  because  the pipeline  automatically  downloads  the  model  weights  from  the  Hugging  Face  Hub. The  second  time  you  instantiate  the  pipeline,  the  library  will  notice  that  you've already downloaded the weights and will use the cached version instead. By default, the text-classification pipeline uses a model that's designed for sentiment analysis, but it also supports multiclass and multilabel classification.
+
+Now that we have our pipeline, let's generate some predictions! Each pipeline takes a string of text (or a list of strings) as input and returns a list of predictions. Each prediction  is  a  Python  dictionary,  so  we  can  use  Pandas  to  display  them  nicely  as  a DataFrame :
+
+![Image](E:\CODE\RAG\Documents\output\part1_artifacts\image_000009_6e88fadc1f71b313be8bb814482f1bd5ebc806eecbb26e78114a80e78df40035.png)
+
+*Image Description:* 
+
+In this case the model is very confident that the text has a negative sentiment, which makes sense given that we're dealing with a complaint from an angry customer! Note that for sentiment analysis tasks the pipeline only returns one of the POSITIVE or NEG ATIVE labels, since the other can be inferred by computing 1-score .
+
+Let's now take a look at another common task, identifying named entities in text.
+
+## Named Entity Recognition
+
+Predicting the sentiment of customer feedback is a good first step, but you often want to  know if  the  feedback  was  about  a  particular  item  or  service.  In  NLP ,  real-world objects  like  products,  places,  and  people  are  called named  entities ,  and  extracting them from text is called named entity recognition (NER). We can apply NER by loading the corresponding pipeline and feeding our customer review to it:
+
+```
+ner_tagger = pipeline("ner", aggregation_strategy="simple") outputs = ner_tagger(text) pd.DataFrame(outputs)
+```
+
+|    | entity_group   |    score | word          |   start |   end |
+|----|----------------|----------|---------------|---------|-------|
+|  0 | ORG            | 0.87901  | Amazon        |       5 |    11 |
+|  1 | MISC           | 0.990859 | Optimus Prime |      36 |    49 |
+
+|
+
+|    | entity_group   |    score | word          |   start |   end |
+|----|----------------|----------|---------------|---------|-------|
+|  2 | LOC            | 0.999755 | Germany       |      90 |    97 |
+|  3 | MISC           | 0.556569 | Mega          |     208 |   212 |
+|  4 | PER            | 0.590256 | ##tron        |     212 |   216 |
+|  5 | ORG            | 0.669692 | Decept        |     253 |   259 |
+|  6 | MISC           | 0.49835  | ##icons       |     259 |   264 |
+|  7 | MISC           | 0.775361 | Megatron      |     350 |   358 |
+|  8 | MISC           | 0.987854 | Optimus Prime |     367 |   380 |
+|  9 | PER            | 0.812096 | Bumblebee     |     502 |   511 |
+
+You  can  see  that  the  pipeline  detected  all  the  entities  and  also  assigned  a  category such as ORG (organization), LOC (location), or PER (person) to each of them. Here we used the aggregation\_strategy argument to group the words according to the model's predictions. For example, the entity 'Optimus Prime' is composed of two words, but is assigned a single category: MISC (miscellaneous). The scores tell us how confident the model was about the entities it identified. We can see that it was least confident  about  'Decepticons'  and  the  first  occurrence  of  'Megatron' ,  both  of  which  it failed to group as a single entity.
+
+![Image](E:\CODE\RAG\Documents\output\part1_artifacts\image_000010_7935bcb252a9dd3caa058842a58555e490ff9ec7d4250362e4c29707fa798df8.png)
+
+*Image Description:* The image illustrates the output of an NLP pipeline performing entity recognition, displaying detected entities (e.g., "Optimus Prime," "Decepticons"), their assigned categories (ORG, LOC, PER, MISC), and confidence scores. It highlights tokenization effects (hash symbols #) and aggregation results, showing how multi-word entities are grouped. Lower confidence scores for "Decepticons" and "Megatron" reflect partial grouping errors. The table-like format emphasizes the model's predictions, token splits, and entity classification nuances.
+
+See those weird hash symbols ( # ) in the word column in the previous  table?  These  are  produced  by  the  model's tokenizer ,  which splits  words  into  atomic  units  called tokens .  Y ou'll  learn  all  about tokenization in Chapter 2.
+
+Extracting all the named entities in a text is nice, but sometimes we would like to ask more targeted questions. This is where we can use question answering .
+
+## Question Answering
+
+In question answering, we provide the model with a passage of text called the context , along with a question whose answer we'd like to extract. The model then returns the span of text corresponding to the answer. Let's see what we get when we ask a specific question about our customer feedback:
+
+```
+reader = pipeline("question-answering") question = "What does the customer want?" outputs = reader(question=question, context=text) pd.DataFrame([outputs])
+```
+
+|    |    score |   start |   end | answer                  |
+|----|----------|---------|-------|-------------------------|
+|  0 | 0.631291 |     335 |   358 | an exchange of Megatron |
+
+We can see that along with the answer, the pipeline also returned start and end integers that correspond to the character indices where the answer span was found (just like with NER tagging). There are several flavors of question answering that we will investigate in Chapter 7, but this particular kind is called extractive question answering because the answer is extracted directly from the text.
+
+With this approach you can read and extract relevant information quickly from a customer's feedback. But what if you get a mountain of long-winded complaints and you don't have the time to read them all? Let's see if a summarization model can help!
+
+## Summarization
+
+The goal of text summarization is to take a long text as input and generate a short version with all the relevant facts. This is a much more complicated task than the previous ones since it requires the model to generate coherent text. In what should be a familiar pattern by now, we can instantiate a summarization pipeline as follows:
+
+```
+summarizer = pipeline("summarization") outputs = summarizer(text, max_length=45, clean_up_tokenization_spaces=True) print (outputs[0]['summary_text']) Bumblebee ordered an Optimus Prime action figure from your online store in Germany. Unfortunately, when I opened the package, I discovered to my horror that I had been sent an action figure of Megatron instead.
+```
+
+This summary isn't too bad! Although parts of the original text have been copied, the model  was  able  to  capture  the  essence  of  the  problem  and  correctly  identify  that 'Bumblebee' (which appeared at the end) was the author of the complaint. In this example you can also see that we passed some keyword arguments like max\_length and clean\_up\_tokenization\_spaces to the pipeline; these allow us to tweak the outputs at runtime.
+
+But what happens when you get feedback that is in a language you don't understand? You could use Google Translate, or you can use your very own transformer to translate it for you!
+
+## Translation
+
+Like summarization, translation is a task where the output consists of generated text. Let's use a translation pipeline to translate an English text to German:
+
+```
+translator = pipeline("translation_en_to_de", model="Helsinki-NLP/opus-mt-en-de") print (outputs[0]['translation_text'])
+```
+
+```
+outputs = translator(text, clean_up_tokenization_spaces=True, min_length=100) Sehr geehrter Amazon, letzte Woche habe ich eine Optimus Prime Action Figur aus
+```
+
+Ihrem Online-Shop in Deutschland bestellt. Leider, als ich das Paket öffnete, entdeckte ich zu meinem Entsetzen, dass ich stattdessen eine Action Figur von
+
+|
+
+Megatron geschickt worden war! Als lebenslanger Feind der Decepticons, Ich hoffe, Sie können mein Dilemma verstehen. Um das Problem zu lösen, Ich fordere einen Austausch von Megatron für die Optimus Prime Figur habe ich bestellt. Anbei sind Kopien meiner Aufzeichnungen über diesen Kauf. Ich erwarte, bald von Ihnen zu hören. Aufrichtig, Bumblebee.
+
+Again, the model produced a very good translation that correctly uses German's formal pronouns, like 'Ihrem' and 'Sie.' Here we've also shown how you can override the default model in the pipeline to pick the best one for your application-and you can find models for thousands of language pairs on the Hugging Face Hub. Before we take a step back and look at the whole Hugging Face ecosystem, let's examine one last application.
+
+## Text Generation
+
+Let's say you would like to be able to provide faster replies to customer feedback by having access to an autocomplete function. With a text generation model you can do this as follows:
+
+```
+generator = pipeline("text-generation") response = "Dear Bumblebee, I am sorry to hear that your order was mixed up." prompt = text + " \n\n Customer service response: \n " + response outputs = generator(prompt, max_length=200) print (outputs[0]['generated_text']) Dear Amazon, last week I ordered an Optimus Prime action figure from your online store in Germany. Unfortunately, when I opened the package, I discovered to my horror that I had been sent an action figure of Megatron instead! As a lifelong enemy of the Decepticons, I hope you can understand my dilemma. To resolve the issue, I demand an exchange of Megatron for the Optimus Prime figure I ordered. Enclosed are copies of my records concerning this purchase. I expect to hear from you soon. Sincerely, Bumblebee. Customer service response: Dear Bumblebee, I am sorry to hear that your order was mixed up. The order was completely mislabeled, which is very common in our online store, but I can appreciate it because it was my understanding from this site and our customer service of the previous day that your order was not made correct in our mind and that we are in a process of resolving this matter. We can assure you that your order
+```
+
+OK, maybe we wouldn't want to use this completion to calm Bumblebee down, but you get the general idea.
+
+Now that you've seen a few cool applications of transformer models, you might be wondering where the training happens. All of the models that we've used in this chapter are publicly available and already fine-tuned for the task at hand. In general, however, you'll want to fine-tune models on your own data, and in the following chapters you will learn how to do just that.
+
+But training a model is just a small piece of any NLP project-being able to efficiently process data, share results with colleagues, and make your work reproducible are key components too. Fortunately, Transformers is surrounded by a big ecosystem of useful tools that support much of the modern machine learning workflow. Let's take a look.
+
+## The Hugging Face Ecosystem
+
+What started with Transformers has quickly grown into a whole ecosystem consisting  of  many  libraries  and  tools  to  accelerate  your  NLP  and  machine  learning projects. The Hugging Face ecosystem consists of mainly two parts: a family of libraries  and  the  Hub,  as  shown  in  Figure  1-9.  The  libraries  provide  the  code  while  the Hub provides the pretrained model weights, datasets, scripts for the evaluation metrics, and more. In this section we'll have a brief look at the various components. We'll skip Transformers, as we've already discussed it and we will see a lot more of it throughout the course of the book.
+
+Figure 1-9. An overview of the Hugging Face ecosystem
+
+![Image](E:\CODE\RAG\Documents\output\part1_artifacts\image_000011_2af44270a22fe028ab75354a2f191a58aeb918cd800ac4fd7f86f1f385d10938.png)
+
+*Image Description:* The image titled "Figure 1-9. An overview of the Hugging Face ecosystem" illustrates the interconnected components of the Hugging Face platform. Central to the diagram is the **Hugging Face Hub**, which integrates key elements like the **Model Hub** (for pre-trained models), **Dataset Hub** (for datasets), **Spaces** (for hosting ML apps), and a vibrant **Community**. Supporting tools such as the **Transformers library**, **Inference API**, and pipelines are linked to the hub, emphasizing collaboration, resource sharing, and accessibility in machine learning workflows. Arrows indicate interactions between components, highlighting the ecosystem's modular and collaborative nature.
+
+## The Hugging Face Hub
+
+As outlined earlier, transfer learning is one of the key factors driving the success of transformers because it makes it possible to reuse pretrained models for new tasks. Consequently,  it  is  crucial  to  be  able  to  load  pretrained  models  quickly  and  run experiments with them.
+
+The  Hugging  Face  Hub  hosts  over  20,000  freely  available  models.  As  shown  in Figure  1-10,  there  are  filters  for  tasks,  frameworks,  datasets,  and  more  that  are designed  to  help  you  navigate  the  Hub  and  quickly  find  promising  candidates.  As we've seen with the pipelines, loading a promising model in your code is then literally just  one line of code away. This makes experimenting with a wide range of models simple, and allows you to focus on the domain-specific parts of your project.
+
+Figure 1-10. The Models page of the Hugging Face Hub, showing filters on the left and a list of models on the right
+
+![Image](E:\CODE\RAG\Documents\output\part1_artifacts\image_000012_993ea654b32e62ee953f01376dc820a5fd5809860b6ea51690f4bc03e720408d.png)
+
+*Image Description:* 
+
+In addition to model weights, the Hub also hosts datasets and scripts for computing metrics,  which  let  you  reproduce  published  results  or  leverage  additional  data  for your application.
+
+The Hub also provides model and dataset cards to document the contents of models and datasets and help you make an informed decision about whether they're the right ones for you. One of the coolest features of the Hub is that you can try out any model directly through the various task-specific interactive widgets as shown in Figure 1-11.
+
+![Image](E:\CODE\RAG\Documents\output\part1_artifacts\image_000013_d4712d76a559b9b13347365ec331a4b72c53cf0f0674fad3797f1c83e72c50f4.png)
+
+*Image Description:* 
+
+Figure 1-11. An example model card from the Hugging Face Hub: the inference widget, which allows you to interact with the model, is shown on the right
+
+![Image](E:\CODE\RAG\Documents\output\part1_artifacts\image_000014_09a9df5bf110c115185a7810bddb92c455a6c85c85b13d3bb28b1dce018ee00e.png)
+
+*Image Description:* The image is a small screenshot (Figure 1-11) from the Hugging Face Hub, showcasing an example **model card**. It highlights an **inference widget** on the right side of the interface, which allows users to interact with the AI model directly by inputting data and receiving predictions. The widget likely includes fields for user input and displays the model's output, demonstrating real-time functionality. The context suggests this is part of a broader discussion about model transparency and tools like tokenizers in AI workflows.
+
+Let's continue our tour with Tokenizers.
+
+![Image](E:\CODE\RAG\Documents\output\part1_artifacts\image_000015_781972b3b234b4a6c4f81b4cd78663f51b6e7071d0ba67531a8c1e53e35398f3.png)
+
+*Image Description:* The image appears to be a screenshot or diagram related to machine learning frameworks, specifically highlighting tokenizers and model hubs like Hugging Face, PyTorch, and TensorFlow. It may include visual elements such as code snippets, architecture diagrams, or comparisons of tools/platforms mentioned in the context. The content likely emphasizes resource availability (e.g., models/datasets) across different hubs. Without direct visual access, this description infers relevance to the provided text context.
+
+PyTorch  and  TensorFlow  also  offer  hubs  of  their  own  and  are worth checking out if a particular model or dataset is not available on the Hugging Face Hub.
+
+## Hugging Face Tokenizers
+
+Behind each of the pipeline examples that we've seen in this chapter is a tokenization step that splits the raw text into smaller pieces called tokens. We'll see how this works in  detail  in  Chapter  2,  but  for  now  it's  enough  to  understand  that  tokens  may  be words, parts of words, or just characters like punctuation. Transformer models are trained  on  numerical  representations  of  these  tokens,  so  getting  this  step  right  is pretty important for the whole NLP project!
+
+Tokenizers provides many tokenization strategies and is extremely fast at tokenizing text thanks to its Rust backend. 12 It also takes care of all the pre- and postprocessing steps, such as normalizing the inputs and transforming the model outputs to the required format. With Tokenizers, we can load a tokenizer in the same way we can load pretrained model weights with Transformers.
+
+12 Rust is a high-performance programming language.
+
+We need a dataset and metrics to train and evaluate models, so let's take a look at Datasets, which is in charge of that aspect.
+
+## Hugging Face Datasets
+
+Loading,  processing,  and  storing  datasets  can  be  a  cumbersome  process,  especially when the datasets get too large to fit in your laptop's RAM. In addition, you usually need to implement various scripts to download the data and transform it into a standard format.
+
+Datasets simplifies this process by providing a standard interface for thousands of datasets that can be found on the Hub. It also provides smart caching (so you don't have to redo your preprocessing each time you run your code) and avoids RAM limitations  by  leveraging  a  special  mechanism  called memory  mapping that  stores  the contents of a file in virtual memory and enables multiple processes to modify a file more efficiently. The library is also interoperable with popular frameworks like Pandas and NumPy, so you don't have to leave the comfort of your favorite data wrangling tools.
+
+Having a good dataset and powerful model is worthless, however, if you can't reliably measure the performance. Unfortunately, classic NLP metrics come with many different implementations that can vary slightly and lead to deceptive results. By providing the scripts for many metrics, Datasets helps make experiments more reproducible and the results more trustworthy.
+
+![Image](E:\CODE\RAG\Documents\output\part1_artifacts\image_000016_ceff42d6696226bc6e2980d43ecc7a840e40b8853f0b605a0d5c540ba51d90a9.png)
+
+*Image Description:* The image is a small grayscale logo featuring a shield shape with a checkmark inside, likely representing a symbol of validation, security, or approval. The design is minimalistic, with the checkmark positioned in the upper left of the shield. Given the context about NLP tools and reproducibility, it may symbolize reliable measurement or verification in machine learning workflows, though the exact branding is unclear due to the low resolution.
+
+With the Transformers, Tokenizers,  and Datasets  libraries  we  have  everything  we  need  to  train  our  very  own  transformer  models!  However,  as  we'll  see  in Chapter 10 there are situations where we need fine-grained control over the training loop. That's where the last library of the ecosystem comes into play: Accelerate.
+
+## Hugging Face Accelerate
+
+If  you've  ever  had  to  write  your  own  training  script  in  PyTorch,  chances  are  that you've had some headaches when trying to port the code that runs on your laptop to the code that runs on your organization's cluster. Accelerate adds a layer of abstraction to your normal training loops that takes care of all the custom logic necessary for the training infrastructure. This literally accelerates your workflow by simplifying the change of infrastructure when necessary.
+
+This  sums  up  the  core  components  of  Hugging  Face's  open  source  ecosystem.  But before wrapping up this chapter, let's take a look at a few of the common challenges that come with trying to deploy transformers in the real world.
+
+## Main Challenges with Transformers
+
+In this chapter we've gotten a glimpse of the wide range of NLP tasks that can be tackled with transformer models. Reading the media headlines, it can sometimes sound like their capabilities are limitless. However, despite their usefulness, transformers are far from being a silver bullet. Here are a few challenges associated with them that we will explore throughout the book:
+
+## Language
+
+NLP research is dominated by the English language. There are several models for other  languages,  but  it  is  harder  to  find  pretrained  models  for  rare  or  lowresource  languages.  In  Chapter  4,  we'll  explore  multilingual  transformers  and their ability to perform zero-shot cross-lingual transfer.
+
+## Data availability
+
+Although  we  can  use  transfer  learning  to  dramatically  reduce  the  amount  of labeled training data our models need, it is still a lot compared to how much a human needs to perform the task. Tackling scenarios where you have little to no labeled data is the subject of Chapter 9.
+
+## Working with long documents
+
+Self-attention works extremely well on paragraph-long texts, but it becomes very expensive when we move to longer texts like whole documents. Approaches to mitigate this are discussed in Chapter 11.
+
+## Opacity
+
+As with other deep learning models, transformers are to a large extent opaque. It is hard or impossible to unravel 'why' a model made a certain prediction. This is an  especially  hard  challenge  when  these  models  are  deployed  to  make  critical decisions. We'll explore some ways to probe the errors of transformer models in Chapters 2 and 4.
+
+Bias
+
+Transformer models are predominantly pretrained on text data from the internet. This imprints all the biases that are present in the data into the models. Making sure that these are neither racist, sexist, or worse is a challenging task. We discuss some of these issues in more detail in Chapter 10.
+
+Although daunting, many of these challenges can be overcome. As well as in the specific chapters mentioned, we will touch on these topics in almost every chapter ahead.
+
+## Conclusion
+
+Hopefully, by now you are excited to learn how to start training and integrating these versatile models into your own applications! You've seen in this chapter that with just a few lines of code you can use state-of-the-art models for classification, named entity recognition,  question  answering,  translation,  and  summarization,  but  this  is  really just the 'tip of the iceberg. '
+
+In the following chapters you will learn how to adapt transformers to a wide range of use cases, such as building a text classifier, or a lightweight model for production, or even training a language model from scratch. We'll be taking a hands-on approach, which means that for every concept covered there will be accompanying code that you can run on Google Colab or your own GPU machine.
+
+Now that we're armed with the basic concepts behind transformers, it's time to get our hands dirty with our first application: text classification. That's the topic of the next chapter!
